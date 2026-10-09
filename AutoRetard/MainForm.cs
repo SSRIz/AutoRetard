@@ -25,7 +25,7 @@ internal sealed class MainForm : Form
     private const int StartStopHotkeyId = 1;
 
     // Visible name of the shortcut. The key itself is KeyOption.ReservedStartStopKey (F6);
-    // if that key ever changes, this text and the "F6" button caption must change with it.
+    // if that key ever changes, this text must change with it.
     private const string ShortcutName = "F6 \u2014 Start/Stop";
     private const string PhaseNote = "Phase 1: interface only. No keys are sent yet.";
 
@@ -40,6 +40,7 @@ internal sealed class MainForm : Form
     private readonly Font _buttonFont = new("Segoe UI", 13f, FontStyle.Bold);
     private readonly Font _errorFont = new("Segoe UI", 10f, FontStyle.Bold);
     private readonly Font _symbolFont = new("Segoe UI Symbol", 10f);
+    private readonly Font _shortcutFont = new("Segoe UI", 9f, FontStyle.Bold);
     private readonly ToolTip _toolTip = new();
     private readonly GlobalHotkey _startStopHotkey = new(StartStopHotkeyId);
 
@@ -59,7 +60,8 @@ internal sealed class MainForm : Form
     private readonly Label _noteLabel = new();
     private readonly Button _startButton = new();
     private readonly Button _stopButton = new();
-    private readonly Button _f6Button = new();
+    private readonly Panel _f6Indicator = new();   // display only: its BackColor is the 1 px outline
+    private readonly Label _f6Label = new();       // display only: shows "F6 - Start/Stop"
     private readonly RadioButton _lightButton = new();
     private readonly RadioButton _darkButton = new();
 
@@ -293,22 +295,19 @@ internal sealed class MainForm : Form
         return row;
     }
 
-    /// <summary>[ Start ] [ Stop ] [ F6 ]: one row, same height. F6 is the quieter, bordered shortcut button.</summary>
+    /// <summary>
+    /// [ Start ] [ Stop ] [ F6 - Start/Stop ]: one row, same height. Start and Stop are buttons;
+    /// the third cell is a display-only indicator that shows which key does the same thing.
+    /// </summary>
     private Control BuildActionRow()
     {
         int half = ColumnGap / 2;
         ConfigureActionButton(_startButton, "Start", new Padding(0, 0, half, 0));
         ConfigureActionButton(_stopButton, "Stop", new Padding(half, 0, half, 0));
-        ConfigureActionButton(_f6Button, "F6", new Padding(half, 0, 0, 0));
         _startButton.TabIndex = 0;
         _stopButton.TabIndex = 1;
-        _f6Button.TabIndex = 2;
+        ConfigureShortcutIndicator(new Padding(half, 0, 0, 0));
 
-        // The F6 button is a visible label for the keyboard shortcut and runs the same Start / Stop toggle.
-        // Its tooltip and accessible description are completed once the hotkey registration result is known
-        // (ApplyHotkeyStatus), so nothing here claims the global shortcut works before it has been tried.
-        _f6Button.AccessibleName = ShortcutName;
-        _toolTip.SetToolTip(_f6Button, ShortcutName);
         _toolTip.SetToolTip(_startButton, "Start (F6)");
         _toolTip.SetToolTip(_stopButton, "Stop (F6)");
 
@@ -319,8 +318,42 @@ internal sealed class MainForm : Form
         row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20f));
         row.Controls.Add(_startButton, 0, 0);
         row.Controls.Add(_stopButton, 1, 0);
-        row.Controls.Add(_f6Button, 2, 0);
+        row.Controls.Add(_f6Indicator, 2, 0);
         return row;
+    }
+
+    /// <summary>
+    /// The F6 indicator is NOT a button: it has no click handler, is never a keyboard tab stop, and has no
+    /// hover or pressed state. It is an outlined "keycap" (a Panel whose 1 px padding shows its BackColor
+    /// around a Label), so it lines up with Start and Stop but cannot be mistaken for an action.
+    /// Its tooltip and accessible description are completed once the hotkey registration result is known
+    /// (ApplyHotkeyStatus), so nothing here claims the global shortcut works before it has been tried.
+    /// </summary>
+    private void ConfigureShortcutIndicator(Padding margin)
+    {
+        _f6Label.Text = ShortcutName;
+        _f6Label.Font = _shortcutFont;
+        _f6Label.AutoSize = false;
+        _f6Label.Dock = DockStyle.Fill;
+        _f6Label.Margin = Padding.Empty;
+        _f6Label.TextAlign = ContentAlignment.MiddleCenter;
+        _f6Label.UseMnemonic = false;
+        _f6Label.AccessibleName = ShortcutName;
+        _f6Label.AccessibleRole = AccessibleRole.StaticText;
+
+        // AutoSize is off and the size is tiny on purpose: the table row takes its height from the Start and
+        // Stop buttons, and Dock = Fill then stretches this panel to exactly that height and the cell width.
+        _f6Indicator.AutoSize = false;
+        _f6Indicator.Size = new Size(1, 1);
+        _f6Indicator.Dock = DockStyle.Fill;
+        _f6Indicator.Margin = margin;
+        _f6Indicator.Padding = new Padding(1);
+        _f6Indicator.TabStop = false;
+        _f6Indicator.AccessibleRole = AccessibleRole.None; // the label inside carries the name and description
+        _f6Indicator.Controls.Add(_f6Label);
+
+        _toolTip.SetToolTip(_f6Label, ShortcutName);
+        _toolTip.SetToolTip(_f6Indicator, ShortcutName);
     }
 
     // ------------------------------------------------------------------
@@ -406,7 +439,6 @@ internal sealed class MainForm : Form
     {
         _startButton.Click += OnStartClicked;
         _stopButton.Click += OnStopClicked;
-        _f6Button.Click += OnShortcutButtonClicked;
         _lightButton.CheckedChanged += (_, _) =>
         {
             if (_lightButton.Checked)
@@ -455,12 +487,10 @@ internal sealed class MainForm : Form
 
     private void OnStopClicked(object? sender, EventArgs e) => RequestStop();
 
-    private void OnShortcutButtonClicked(object? sender, EventArgs e) => ToggleRunning();
-
     /// <summary>
-    /// The single Start / Stop toggle. The F6 button, the global F6 hotkey and the in-window
-    /// fallback all end up here, and it only calls the same RequestStart / RequestStop as the
-    /// Start and Stop buttons. No other code decides when the running state changes.
+    /// The single Start / Stop toggle. The global F6 hotkey and the in-window fallback both end up
+    /// here, and it only calls the same RequestStart / RequestStop as the Start and Stop buttons.
+    /// No other code decides when the running state changes.
     /// </summary>
     private void ToggleRunning()
     {
@@ -640,19 +670,26 @@ internal sealed class MainForm : Form
     {
         if (globalHotkeyActive)
         {
-            _toolTip.SetToolTip(_f6Button, ShortcutName + " (works from any window)");
-            _f6Button.AccessibleDescription =
-                "Starts or stops, exactly like the Start and Stop buttons. The F6 key does the same, from any window.";
+            SetShortcutIndicatorText(
+                ShortcutName + " (works from any window)",
+                "Shows the keyboard shortcut. The F6 key starts or stops, exactly like the Start and Stop buttons, from any window.");
             _noteLabel.Text = PhaseNote;
         }
         else
         {
-            _toolTip.SetToolTip(_f6Button, ShortcutName + " (works only while this window is active)");
-            _f6Button.AccessibleDescription =
-                "Starts or stops, exactly like the Start and Stop buttons. The F6 key does the same, but only while this window is active.";
+            SetShortcutIndicatorText(
+                ShortcutName + " (works only while this window is active)",
+                "Shows the keyboard shortcut. The F6 key starts or stops, exactly like the Start and Stop buttons, but only while this window is active.");
             _noteLabel.Text = PhaseNote + Environment.NewLine +
                 "Global F6 is unavailable (it may be in use by another program). F6 works only while this window is active.";
         }
+    }
+
+    private void SetShortcutIndicatorText(string toolTip, string accessibleDescription)
+    {
+        _toolTip.SetToolTip(_f6Label, toolTip);
+        _toolTip.SetToolTip(_f6Indicator, toolTip);
+        _f6Label.AccessibleDescription = accessibleDescription;
     }
 
     // ------------------------------------------------------------------
@@ -711,7 +748,7 @@ internal sealed class MainForm : Form
     {
         StyleActionButton(_startButton, p, p.StartBack, p.StartText);
         StyleActionButton(_stopButton, p, p.StopBack, p.StopText);
-        StyleNeutralButton(_f6Button, p);
+        ApplyShortcutIndicatorColors(p);
         StyleThemeButton(_lightButton, p, selected: !_isDark);
         StyleThemeButton(_darkButton, p, selected: _isDark);
     }
@@ -730,11 +767,15 @@ internal sealed class MainForm : Form
         }
     }
 
-    /// <summary>Quiet, bordered look for the F6 shortcut button, so it reads as secondary to Start and Stop.</summary>
-    private static void StyleNeutralButton(Button button, ThemePalette p)
+    /// <summary>
+    /// Outlined, unfilled "keycap" look: the form background, the same border color as the other controls,
+    /// and normal text. No fill and no hover or pressed colors, so it reads as a label, not as a button.
+    /// </summary>
+    private void ApplyShortcutIndicatorColors(ThemePalette p)
     {
-        StyleFlatButton(button, p.ButtonBack, p.ButtonText, p.ButtonBorder,
-            ThemePalette.Hover(p.ButtonBack), ThemePalette.Pressed(p.ButtonBack));
+        _f6Indicator.BackColor = p.ButtonBorder;
+        _f6Label.BackColor = p.FormBack;
+        _f6Label.ForeColor = p.Text;
     }
 
     private static void StyleThemeButton(RadioButton button, ThemePalette p, bool selected)
@@ -783,6 +824,7 @@ internal sealed class MainForm : Form
         if (disposing)
         {
             _toolTip.Dispose();
+            _shortcutFont.Dispose();
             _symbolFont.Dispose();
             _errorFont.Dispose();
             _buttonFont.Dispose();
